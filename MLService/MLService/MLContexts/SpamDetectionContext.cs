@@ -1,44 +1,27 @@
 ﻿using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.ML;
 using MLService.MLDataStructures;
-using System;
 using System.IO;
-using System.IO.Compression;
 using System.Linq;
-using System.Net;
 
-namespace MLService.Controllers
+namespace MLService.MLPredictors
 {
-    [Route("api/[controller]")]
-    [ApiController]
-    public class SpamDetectionController : ControllerBase
+    public interface ISpamDetectionContextSingleton
     {
-        private static string AppPath => Path.GetDirectoryName(Environment.GetCommandLineArgs()[0]);
-        private static string DataDirectoryPath => Path.Combine(AppPath, "..", "..", "..", "Data", "spamfolder");
-        //private static string TrainDataPath => Path.Combine(AppPath, "..", "..", "..", "Data", "spamfolder", "SMSSpamCollection");
+        bool IsSpam(string message);
+    }
 
-        private static string TrainDataPath;//=> @"SMSSpamCollection";
-
+    public class SpamDetectionContextSingleton : ISpamDetectionContextSingleton
+    {
         private PredictionEngine<SpamInput, SpamPrediction> Predictor { get; set; }
 
-        public SpamDetectionController(IHostingEnvironment env)
+        private readonly IHostingEnvironment Environment;
+        private static string TrainDataPath { get; set; }
+
+        public SpamDetectionContextSingleton(IHostingEnvironment environment)
         {
-            var webRoot = env.WebRootPath;
-            TrainDataPath = Path.Combine(webRoot, "SMSSpamCollection");
-
-            // Download the dataset if it doesn't exist.
-            //if (!System.IO.File.Exists(TrainDataPath))
-            //{
-            //    using (var client = new WebClient())
-            //    {
-            //        //The code below will download a dataset from a third-party, UCI (link), and may be governed by separate third-party terms. 
-            //        //By proceeding, you agree to those separate terms.
-            //        client.DownloadFile("https://archive.ics.uci.edu/ml/machine-learning-databases/00228/smsspamcollection.zip", "spam.zip");
-            //    }
-
-            //    ZipFile.ExtractToDirectory("spam.zip", DataDirectoryPath);
-            //}
+            Environment = environment;
+            TrainDataPath = Path.Combine(Environment.WebRootPath, "SMSSpamCollection");
 
             // Set up the MLContext, which is a catalog of components in ML.NET.
             MLContext mlContext = new MLContext();
@@ -67,53 +50,20 @@ namespace MLService.Controllers
             // Cross-validation splits our dataset into 'folds', trains a model on some folds and 
             // evaluates it on the remaining fold. We are using 5 folds so we get back 5 sets of scores.
             // Let's compute the average AUC, which should be between 0.5 and 1 (higher is better).
-            //Console.WriteLine("=============== Cross-validating to get model's accuracy metrics ===============");
             var crossValidationResults = mlContext.MulticlassClassification.CrossValidate(data: data, estimator: trainingPipeLine, numberOfFolds: 5);
-            //ConsoleHelper.PrintMulticlassClassificationFoldsAverageMetrics(trainer.ToString(), crossValidationResults);
 
             // Now let's train a model on the full dataset to help us get better results
             var model = trainingPipeLine.Fit(data);
 
             //Create a PredictionFunction from our model 
             this.Predictor = mlContext.Model.CreatePredictionEngine<SpamInput, SpamPrediction>(model);
-
-            //Console.WriteLine("=============== Predictions for below data===============");
-            // Test a few examples
-            //ClassifyMessage(predictor, "That's a great idea. It should work.");
-            //ClassifyMessage(predictor, "free medicine winner! congratulations");
-            //ClassifyMessage(predictor, "Yes we should meet over the weekend!");
-            //ClassifyMessage(predictor, "you win pills and free entry vouchers");
-
-            //Console.WriteLine("=============== End of process, hit any key to finish =============== ");
-            //Console.ReadLine();
         }
 
-        [HttpGet()]
-        public ActionResult<string> Get()
-        {
-            var input = new SpamInput { Message = "That's a great idea. It should work." };
-            var prediction = this.Predictor.Predict(input);
-
-            return prediction.isSpam == "spam" ? "Spam" : "Not Spam";
-        }
-
-        [HttpPost]
-        public ActionResult<string> Post([FromBody] string message)
+        public bool IsSpam(string message)
         {
             var input = new SpamInput { Message = message };
             var prediction = this.Predictor.Predict(input);
-
-            return prediction.isSpam == "spam" ? "Spam" : "Not Spam";
-        }
-
-        public static string GetAbsolutePath(string relativePath)
-        {
-            FileInfo _dataRoot = new FileInfo(typeof(Program).Assembly.Location);
-            string assemblyFolderPath = _dataRoot.Directory.FullName;
-
-            string fullPath = Path.Combine(assemblyFolderPath, relativePath);
-
-            return fullPath;
+            return prediction.isSpam == "spam";
         }
     }
 }
